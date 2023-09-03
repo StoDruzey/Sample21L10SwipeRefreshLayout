@@ -1,11 +1,13 @@
 package com.example.sample21l10swiperefreshlayout
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.recyclerview.widget.RecyclerView
 import com.example.sample21l10swiperefreshlayout.databinding.FragmentFirstBinding
 import retrofit2.Call
 import retrofit2.Callback
@@ -38,41 +40,24 @@ class FirstFragment : Fragment() {
 
         with(binding) {
             swipeRefresh.setOnRefreshListener {
-                recyclerView.adapter = adapter
-                val retrofit = Retrofit.Builder()
-                    .baseUrl("https://api.github.com/")
-                    .addConverterFactory(GsonConverterFactory.create())
-                    .build()
-
-                val githubInterface = retrofit.create<GithubInterface>()
-                currentRequest = githubInterface
-                    .getUsers(1, 100)
-                    .apply {
-                        enqueue(object : Callback<List<User>> {
-                            override fun onResponse(
-                                call: Call<List<User>>,
-                                response: Response<List<User>>
-                            ) {
-                                if (response.isSuccessful) {
-                                    val users = response.body() ?: return
-                                    currentUsers.addAll(users)
-                                    val items =
-                                        users.map { PagingData.Item(it) } + PagingData.Loading
-                                    adapter.submitList(items)
-                                } else {
-                                    handleException(HttpException(response))
-                                }
-                            }
-
-                            override fun onFailure(call: Call<List<User>>, t: Throwable) {
-                                if (!call.isCanceled) {
-                                    handleException(t)
-                                }
-                            }
-                        })
-                    }
+                executeRequest {
+                    swipeRefresh.isRefreshing = false
+                }
             }
-            swipeRefresh.isRefreshing = true
+            recyclerView.adapter = adapter
+            recyclerView.addItemDecoration(
+                object : RecyclerView.ItemDecoration() {
+                    override fun getItemOffsets(
+                        outRect: Rect,
+                        view: View,
+                        parent: RecyclerView,
+                        state: RecyclerView.State
+                    ) {
+                        outRect.bottom = 50
+                    }
+                }
+            )
+
 
 
 //            toolbar
@@ -91,6 +76,7 @@ class FirstFragment : Fragment() {
 //                    }
 //                })
         }
+        executeRequest()
     }
 
     override fun onDestroyView() {
@@ -102,5 +88,43 @@ class FirstFragment : Fragment() {
 
     private fun handleException(e: Throwable) {
         Toast.makeText(requireContext(), e.message ?: "Something went wrong", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun executeRequest(
+        onRequestFinished: () -> Unit = {}
+    ) {
+        val finishRequest = {
+            onRequestFinished()
+            currentRequest = null
+        }
+        currentRequest?.cancel()
+        currentRequest = GithubService.api
+            .getUsers(1, 100)
+            .apply {
+                enqueue(object : Callback<List<User>> {
+                    override fun onResponse(
+                        call: Call<List<User>>,
+                        response: Response<List<User>>
+                    ) {
+                        if (response.isSuccessful) {
+                            val users = response.body() ?: return
+                            currentUsers.addAll(users)
+                            val items =
+                                users.map { PagingData.Item(it) } + PagingData.Loading
+                            adapter.submitList(items)
+                        } else {
+                            handleException(HttpException(response))
+                        }
+                        finishRequest()
+                    }
+
+                    override fun onFailure(call: Call<List<User>>, t: Throwable) {
+                        if (!call.isCanceled) {
+                            handleException(t)
+                        }
+                        finishRequest()
+                    }
+                })
+            }
     }
 }
